@@ -88,3 +88,49 @@ export function extractRawImageUrls(node, galleryImageUrls = []) {
 
     return images;
 }
+
+const MIME_TO_EXT = {
+    'image/webp': '.webp',
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/gif': '.gif',
+    'image/bmp': '.bmp',
+    'image/svg+xml': '.svg',
+    'image/avif': '.avif',
+};
+
+const IMAGE_EXTENSIONS = new Set(Object.values(MIME_TO_EXT));
+
+export function guessExtension(url, contentType) {
+    if (contentType) {
+        const mime = contentType.split(';')[0].trim().toLowerCase();
+        if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+    }
+    if (url) {
+        try {
+            const pathname = new URL(url).pathname;
+            const ext = pathname.substring(pathname.lastIndexOf('.')).toLowerCase();
+            if (IMAGE_EXTENSIONS.has(ext)) return ext;
+        } catch { /* invalid URL */ }
+    }
+    return '.bin';
+}
+
+const SINGULAR_SOURCES = new Set(['avatar', 'card', 'background']);
+
+export function generateFilename(source, sourceCounters, ext) {
+    if (SINGULAR_SOURCES.has(source)) {
+        return `${source}${ext}`;
+    }
+    const count = (sourceCounters.get(source) || 0) + 1;
+    sourceCounters.set(source, count);
+    return `${source}_${String(count).padStart(2, '0')}${ext}`;
+}
+
+export function resolveCollision(filename, existingNames, contentHash) {
+    if (!existingNames.has(filename)) return filename;
+    const dotIdx = filename.lastIndexOf('.');
+    const base = filename.substring(0, dotIdx);
+    const ext = filename.substring(dotIdx);
+    return `${base}_${contentHash.substring(0, 8)}${ext}`;
+}
