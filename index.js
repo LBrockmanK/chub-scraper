@@ -8,15 +8,13 @@ import {
 const CHUB_API = 'https://api.chub.ai/api/characters';
 const CHUB_GALLERY_API = 'https://gateway.chub.ai/api/gallery/project';
 
-async function corsFetch(url, options = {}) {
-    const headers = {
-        ...getRequestHeaders(),
-        ...options.headers,
-    };
-    const response = await fetch('/api/cors', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ url, ...options }),
+function stContext() {
+    return SillyTavern.getContext();
+}
+
+async function corsFetch(url) {
+    const response = await fetch(`/proxy/${encodeURIComponent(url)}`, {
+        headers: stContext().getRequestHeaders(),
     });
     if (!response.ok) {
         throw new Error(`Fetch failed (${response.status}): ${url}`);
@@ -54,7 +52,7 @@ async function hashContent(arrayBuffer) {
 async function getExistingGalleryHashes(galleryFolder) {
     const listResp = await fetch('/api/images/list', {
         method: 'POST',
-        headers: getRequestHeaders(),
+        headers: stContext().getRequestHeaders(),
         body: JSON.stringify({ folder: galleryFolder }),
     });
     if (!listResp.ok) return { hashes: new Set(), filenames: new Set() };
@@ -63,12 +61,10 @@ async function getExistingGalleryHashes(galleryFolder) {
     const hashes = new Set();
     const filenames = new Set();
 
-    for (const filePath of fileList) {
-        const name = filePath.split('/').pop().split('\\').pop();
-        filenames.add(name);
-
+    for (const file of fileList) {
+        filenames.add(file);
         try {
-            const imgResp = await fetch(filePath);
+            const imgResp = await fetch(`user/images/${galleryFolder}/${file}`);
             if (!imgResp.ok) continue;
             const buffer = await imgResp.arrayBuffer();
             hashes.add(await hashContent(buffer));
@@ -90,7 +86,7 @@ async function downloadImage(url) {
 async function uploadToGallery(base64Data, format, galleryFolder, filename) {
     const resp = await fetch('/api/images/upload', {
         method: 'POST',
-        headers: getRequestHeaders(),
+        headers: stContext().getRequestHeaders(),
         body: JSON.stringify({
             image: base64Data,
             format: format,
@@ -173,85 +169,96 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
     return { added, skipped, failed, total: imageEntries.length };
 }
 
-// --- UI (Task 4) ---
+// --- UI ---
 
 function getChubFullPath() {
-    const context = getContext();
-    const char = context?.characters?.[context?.characterId];
+    const context = stContext();
+    const char = context.characters?.[context.characterId];
     return char?.data?.extensions?.chub?.full_path || '';
 }
 
 function getGalleryFolder() {
-    const context = getContext();
-    const char = context?.characters?.[context?.characterId];
+    const context = stContext();
+    const char = context.characters?.[context.characterId];
     if (!char) return '';
-    const folders = extension_settings?.gallery?.folders || {};
+    const folders = context.extensionSettings?.gallery?.folders || {};
     return folders[char.avatar] || char.name || '';
 }
 
-function updateButtonState() {
-    const btn = document.getElementById('chub_fetch_btn');
-    if (!btn) return;
+function injectButton(galleryElement) {
+    if (galleryElement.querySelector('#chub_fetch_btn')) return;
+
+    const topBar = galleryElement.querySelector('.flex-container.alignItemsCenter');
+    if (!topBar) return;
+
+    const btn = document.createElement('div');
+    btn.id = 'chub_fetch_btn';
+    btn.classList.add('right_menu_button');
+    btn.title = 'Fetch images from Chub.ai';
+    btn.innerHTML = '<span class="fa-solid fa-cloud-arrow-down fa-fw"></span>';
+
+    const statusEl = document.createElement('span');
+    statusEl.id = 'chub_fetch_status';
+    statusEl.classList.add('chub-status');
+
     const hasChub = !!getChubFullPath();
-    btn.disabled = !hasChub;
-    btn.title = hasChub
-        ? 'Fetch images from Chub.ai'
-        : 'No Chub origin detected for this character';
-}
-
-async function onFetchClick() {
-    const btn = document.getElementById('chub_fetch_btn');
-    const status = document.getElementById('chub_fetch_status');
-    const fullPath = getChubFullPath();
-    const folder = getGalleryFolder();
-
-    if (!fullPath || !folder) return;
-
-    btn.disabled = true;
-    try {
-        const result = await fetchAndImportImages(fullPath, folder, (msg) => {
-            status.textContent = msg;
-        });
-
-        const parts = [];
-        if (result.added > 0) parts.push(`Added ${result.added} new image${result.added === 1 ? '' : 's'}`);
-        if (result.skipped > 0) parts.push(`${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped`);
-        if (result.failed > 0) parts.push(`${result.failed} failed`);
-        if (result.total === 0) parts.push('No images found on Chub');
-
-        status.textContent = parts.join(', ');
-    } catch (err) {
-        console.error(`[Chub Gallery] Error:`, err);
-        status.textContent = `Error: ${err.message}`;
-    } finally {
-        updateButtonState();
+    if (!hasChub) {
+        btn.classList.add('disabled');
+        btn.title = 'No Chub origin detected for this character';
     }
+
+    btn.addEventListener('click', async () => {
+        const fullPath = getChubFullPath();
+        const folder = getGalleryFolder();
+        if (!fullPath || !folder || btn.classList.contains('disabled')) return;
+
+        btn.classList.add('disabled');
+        try {
+            const result = await fetchAndImportImages(fullPath, folder, (msg) => {
+                statusEl.textContent = msg;
+            });
+
+            const parts = [];
+            if (result.added > 0) parts.push(`${result.added} added`);
+            if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
+            if (result.failed > 0) parts.push(`${result.failed} failed`);
+            if (result.total === 0) parts.push('No images on Chub');
+
+            statusEl.textContent = parts.join(', ');
+            toastr.info(parts.join(', '), 'Chub Gallery Scraper');
+        } catch (err) {
+            console.error('[Chub Gallery] Error:', err);
+            statusEl.textContent = `Error: ${err.message}`;
+            toastr.error(err.message, 'Chub Gallery Scraper');
+        } finally {
+            if (getChubFullPath()) {
+                btn.classList.remove('disabled');
+            }
+        }
+    });
+
+    topBar.appendChild(btn);
+    topBar.appendChild(statusEl);
 }
 
 jQuery(async () => {
-    const buttonHtml = `
-        <div id="chub_gallery_scraper_container" style="margin: 4px 0;">
-            <button id="chub_fetch_btn" class="chub-fetch-btn" disabled>
-                Fetch Chub Images
-            </button>
-            <div id="chub_fetch_status" class="chub-status"></div>
-        </div>
-    `;
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node instanceof HTMLElement && node.id === 'gallery') {
+                    injectButton(node);
+                }
+            }
+        }
+    });
 
-    const galleryContainer = $('#gallery_pane, #form_character_gallery').first();
-    if (galleryContainer.length) {
-        galleryContainer.prepend(buttonHtml);
-    } else {
-        $('#extensions_settings').append(buttonHtml);
+    observer.observe(document.getElementById('movingDivs') || document.body, {
+        childList: true,
+        subtree: false,
+    });
+
+    const existing = document.getElementById('gallery');
+    if (existing) {
+        injectButton(existing);
     }
-
-    document.getElementById('chub_fetch_btn')?.addEventListener('click', onFetchClick);
-
-    const eventSource = getContext()?.eventSource;
-    if (eventSource) {
-        eventSource.on('characterSelected', updateButtonState);
-        eventSource.on('chatLoaded', updateButtonState);
-    }
-
-    updateButtonState();
 });
