@@ -1,0 +1,8 @@
+{
+    "display_name": "Chub Gallery Scraper",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css"
+}
