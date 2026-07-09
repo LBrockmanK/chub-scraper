@@ -46,8 +46,11 @@ export function extractRawImageUrls(node, galleryImageUrls = []) {
         images.push({ url, source });
     }
 
-    add(node.avatar_url, 'avatar');
-    add(node.max_res_url, 'card');
+    if (node.max_res_url) {
+        add(node.max_res_url, 'card');
+    } else {
+        add(node.avatar_url, 'avatar');
+    }
 
     const chubExt = node.extensions?.chub;
     if (chubExt?.background_image) {

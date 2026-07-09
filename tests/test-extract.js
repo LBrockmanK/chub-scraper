@@ -80,15 +80,24 @@ describe('extractImagesFromHtml', () => {
 });
 
 describe('extractRawImageUrls', () => {
-    it('extracts avatar and card URLs', () => {
+    it('prefers max_res_url over avatar_url', () => {
         const node = {
             avatar_url: 'https://example.com/avatar.png',
             max_res_url: 'https://example.com/card.jpg',
         };
         const result = extractRawImageUrls(node);
-        assert.equal(result.length, 2);
+        assert.equal(result.length, 1);
+        assert.equal(result[0].source, 'card');
+        assert.equal(result[0].url, 'https://example.com/card.jpg');
+    });
+
+    it('falls back to avatar_url when max_res_url is missing', () => {
+        const node = {
+            avatar_url: 'https://example.com/avatar.png',
+        };
+        const result = extractRawImageUrls(node);
+        assert.equal(result.length, 1);
         assert.equal(result[0].source, 'avatar');
-        assert.equal(result[1].source, 'card');
     });
 
     it('extracts background from extensions.chub', () => {

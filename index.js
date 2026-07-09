@@ -200,6 +200,14 @@ function getGalleryFolder() {
     return folders[char.avatar] || char.name || '';
 }
 
+function refreshGallery() {
+    const gallery = document.getElementById('gallery');
+    if (gallery) gallery.remove();
+    setTimeout(() => {
+        document.getElementById('show_gallery_wand_button')?.click();
+    }, 200);
+}
+
 function injectButton(galleryElement) {
     if (galleryElement.querySelector('#chub_fetch_btn')) return;
 
@@ -242,17 +250,18 @@ function injectButton(galleryElement) {
             if (result.failed > 0) parts.push(`${result.failed} failed`);
             if (result.total === 0) parts.push('No images on Chub');
 
-            statusEl.textContent = parts.join(', ');
             toastr.info(parts.join(', '), 'Chub Gallery Scraper');
+
+            if (result.added > 0) {
+                refreshGallery();
+            }
         } catch (err) {
             console.error('[Chub Gallery] Error:', err);
-            statusEl.textContent = `Error: ${err.message}`;
             toastr.error(err.message, 'Chub Gallery Scraper');
+            statusEl.textContent = `Error: ${err.message}`;
         } finally {
             running = false;
-            if (getChubFullPath()) {
-                btn.classList.remove('disabled');
-            }
+            btn.classList.remove('disabled');
         }
     });
 
