@@ -12,10 +12,23 @@ function stContext() {
     return SillyTavern.getContext();
 }
 
+class CorsProxyDisabledError extends Error {
+    constructor() {
+        super('CORS proxy is disabled. Set enableCorsProxy: true in config.yaml and restart SillyTavern.');
+        this.name = 'CorsProxyDisabledError';
+    }
+}
+
 async function corsFetch(url) {
     const response = await fetch(`/proxy/${encodeURIComponent(url)}`, {
         headers: stContext().getRequestHeaders(),
     });
+    if (response.status === 404) {
+        const text = await response.text();
+        if (text.includes('CORS proxy is disabled')) {
+            throw new CorsProxyDisabledError();
+        }
+    }
     if (!response.ok) {
         throw new Error(`Fetch failed (${response.status}): ${url}`);
     }
@@ -37,7 +50,8 @@ async function fetchGalleryFromChub(projectId) {
         return (data.nodes || [])
             .map(n => n.primary_image_path)
             .filter(Boolean);
-    } catch {
+    } catch (err) {
+        if (err instanceof CorsProxyDisabledError) throw err;
         return [];
     }
 }
@@ -161,6 +175,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
             await uploadToGallery(base64, formatWithoutDot, galleryFolder, nameWithoutExt);
             added++;
         } catch (err) {
+            if (err instanceof CorsProxyDisabledError) throw err;
             console.error(`[Chub Gallery] Failed: ${entry.url}`, err);
             failed++;
         }
@@ -207,11 +222,14 @@ function injectButton(galleryElement) {
         btn.title = 'No Chub origin detected for this character';
     }
 
+    let running = false;
     btn.addEventListener('click', async () => {
+        if (running) return;
         const fullPath = getChubFullPath();
         const folder = getGalleryFolder();
         if (!fullPath || !folder || btn.classList.contains('disabled')) return;
 
+        running = true;
         btn.classList.add('disabled');
         try {
             const result = await fetchAndImportImages(fullPath, folder, (msg) => {
@@ -231,6 +249,7 @@ function injectButton(galleryElement) {
             statusEl.textContent = `Error: ${err.message}`;
             toastr.error(err.message, 'Chub Gallery Scraper');
         } finally {
+            running = false;
             if (getChubFullPath()) {
                 btn.classList.remove('disabled');
             }
