@@ -104,6 +104,8 @@ const MIME_TO_EXT = {
 
 const IMAGE_EXTENSIONS = new Set(Object.values(MIME_TO_EXT));
 
+const EXT_ALIASES = { '.jpeg': '.jpg' };
+
 export function guessExtension(url, contentType) {
     if (contentType) {
         const mime = contentType.split(';')[0].trim().toLowerCase();
@@ -112,7 +114,8 @@ export function guessExtension(url, contentType) {
     if (url) {
         try {
             const pathname = new URL(url).pathname;
-            const ext = pathname.substring(pathname.lastIndexOf('.')).toLowerCase();
+            const raw = pathname.substring(pathname.lastIndexOf('.')).toLowerCase();
+            const ext = EXT_ALIASES[raw] || raw;
             if (IMAGE_EXTENSIONS.has(ext)) return ext;
         } catch { /* invalid URL */ }
     }

@@ -27,6 +27,11 @@ describe('guessExtension', () => {
         assert.equal(guessExtension('https://example.com/img.PNG', ''), '.png');
     });
 
+    it('normalizes .jpeg to .jpg in URL fallback', () => {
+        assert.equal(guessExtension('https://example.com/photo.jpeg', ''), '.jpg');
+        assert.equal(guessExtension('https://example.com/photo.JPEG', ''), '.jpg');
+    });
+
     it('recognizes all supported MIME types', () => {
         assert.equal(guessExtension('', 'image/webp'), '.webp');
         assert.equal(guessExtension('', 'image/gif'), '.gif');
