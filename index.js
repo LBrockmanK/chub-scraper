@@ -200,12 +200,9 @@ function getGalleryFolder() {
     return folders[char.avatar] || char.name || '';
 }
 
-function refreshGallery() {
-    const gallery = document.getElementById('gallery');
-    if (gallery) gallery.remove();
-    setTimeout(() => {
-        document.getElementById('show_gallery_wand_button')?.click();
-    }, 200);
+function closeGallery() {
+    const closeBtn = document.querySelector('#gallery .dragClose');
+    if (closeBtn) closeBtn.click();
 }
 
 function injectButton(galleryElement) {
@@ -253,7 +250,7 @@ function injectButton(galleryElement) {
             toastr.info(parts.join(', '), 'Chub Gallery Scraper');
 
             if (result.added > 0) {
-                refreshGallery();
+                closeGallery();
             }
         } catch (err) {
             console.error('[Chub Gallery] Error:', err);
