@@ -208,18 +208,14 @@ function closeGallery() {
 function injectButton(galleryElement) {
     if (galleryElement.querySelector('#chub_fetch_btn')) return;
 
-    const topBar = galleryElement.querySelector('.flex-container.alignItemsCenter');
-    if (!topBar) return;
+    const controlsContainer = galleryElement.querySelector('.dragTitle .flex-container.alignItemsCenter');
+    if (!controlsContainer) return;
 
     const btn = document.createElement('div');
     btn.id = 'chub_fetch_btn';
-    btn.classList.add('right_menu_button');
+    btn.classList.add('menu_button', 'menu_button_icon', 'interactable');
     btn.title = 'Fetch images from Chub.ai';
-    btn.innerHTML = '<span class="fa-solid fa-cloud-arrow-down fa-fw"></span>';
-
-    const statusEl = document.createElement('span');
-    statusEl.id = 'chub_fetch_status';
-    statusEl.classList.add('chub-status');
+    btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down fa-fw"></i>';
 
     const hasChub = !!getChubFullPath();
     if (!hasChub) {
@@ -236,9 +232,12 @@ function injectButton(galleryElement) {
 
         running = true;
         btn.classList.add('disabled');
+        const icon = btn.querySelector('i');
+        icon.classList.replace('fa-cloud-arrow-down', 'fa-spinner');
+        icon.classList.add('fa-spin');
         try {
             const result = await fetchAndImportImages(fullPath, folder, (msg) => {
-                statusEl.textContent = msg;
+                btn.title = msg;
             });
 
             const parts = [];
@@ -255,15 +254,16 @@ function injectButton(galleryElement) {
         } catch (err) {
             console.error('[Chub Gallery] Error:', err);
             toastr.error(err.message, 'Chub Gallery Scraper');
-            statusEl.textContent = `Error: ${err.message}`;
         } finally {
             running = false;
             btn.classList.remove('disabled');
+            icon.classList.remove('fa-spin');
+            icon.classList.replace('fa-spinner', 'fa-cloud-arrow-down');
+            btn.title = 'Fetch images from Chub.ai';
         }
     });
 
-    topBar.appendChild(btn);
-    topBar.appendChild(statusEl);
+    controlsContainer.appendChild(btn);
 }
 
 jQuery(async () => {
