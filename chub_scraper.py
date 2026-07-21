@@ -166,7 +166,7 @@ def _extract_images_from_html(html: str, field_name: str, add):
         add(m.group(1), f"{field_name} (markdown image)")
 
     # Bare URLs that look like images
-    for m in re.finditer(r"https?://[^\s\"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)", html, re.IGNORECASE):
+    for m in re.finditer(r"https?://[^\s\"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)(?=[?#\s\"'<>)]|$)", html, re.IGNORECASE):
         add(m.group(0), f"{field_name} (url)")
 
 

@@ -163,7 +163,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
             }
             batchHashes.add(contentHash);
 
-            const ext = guessExtension(entry.url, contentType);
+            const ext = guessExtension(entry.url, contentType, buffer);
             let filename = generateFilename(entry.source, sourceCounters, ext);
             filename = resolveCollision(filename, existingNames, contentHash);
             existingNames.add(filename);

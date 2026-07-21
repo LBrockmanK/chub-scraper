@@ -29,7 +29,7 @@ export function extractImagesFromHtml(html, fieldName) {
     for (const m of html.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)) {
         add(m[1], fieldName);
     }
-    for (const m of html.matchAll(/https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)/gi)) {
+    for (const m of html.matchAll(/https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)(?=[?#\s"'<>)]|$)/gi)) {
         add(m[0], fieldName);
     }
 
@@ -106,7 +106,21 @@ const IMAGE_EXTENSIONS = new Set(Object.values(MIME_TO_EXT));
 
 const EXT_ALIASES = { '.jpeg': '.jpg' };
 
-export function guessExtension(url, contentType) {
+function extFromMagicBytes(buffer) {
+    if (!buffer || buffer.byteLength < 12) return null;
+    const bytes = new Uint8Array(buffer);
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return '.png';
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return '.jpg';
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return '.gif';
+    if (bytes[0] === 0x42 && bytes[1] === 0x4D) return '.bmp';
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return '.webp';
+    const str4to12 = String.fromCharCode(...bytes.slice(4, 12));
+    if (str4to12.includes('ftyp') && (str4to12.includes('avif') || str4to12.includes('avis'))) return '.avif';
+    return null;
+}
+
+export function guessExtension(url, contentType, buffer) {
     if (contentType) {
         const mime = contentType.split(';')[0].trim().toLowerCase();
         if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
@@ -119,7 +133,7 @@ export function guessExtension(url, contentType) {
             if (IMAGE_EXTENSIONS.has(ext)) return ext;
         } catch { /* invalid URL */ }
     }
-    return '.bin';
+    return extFromMagicBytes(buffer) || '.bin';
 }
 
 const SINGULAR_SOURCES = new Set(['avatar', 'card', 'background']);

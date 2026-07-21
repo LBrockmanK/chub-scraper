@@ -73,6 +73,19 @@ describe('extractImagesFromHtml', () => {
         assert.equal(result[0].url, 'https://example.com/nq.jpg');
     });
 
+    it('does not truncate URLs with image extension mid-path', () => {
+        const html = '<img src="https://media.datacat.run/media/file.webp/a1b49d2a004cabe">';
+        const result = extractImagesFromHtml(html, 'description');
+        assert.equal(result.length, 1);
+        assert.equal(result[0].url, 'https://media.datacat.run/media/file.webp/a1b49d2a004cabe');
+    });
+
+    it('still matches bare URLs with extension at end of path', () => {
+        const html = 'Check https://example.com/photo.webp and https://example.com/img.png?w=500 ok';
+        const result = extractImagesFromHtml(html, 'description');
+        assert.equal(result.length, 2);
+    });
+
     it('returns empty array for text with no images', () => {
         const result = extractImagesFromHtml('Just plain text here', 'description');
         assert.equal(result.length, 0);
