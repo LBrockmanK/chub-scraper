@@ -158,9 +158,13 @@ export function resolveCollision(filename, existingNames, contentHash) {
 /**
  * Extensions SillyTavern's MEDIA_EXTENSIONS allowlist accepts (src/constants.js).
  *
- * Both /api/images/upload and /api/images/list gate on this list, so anything
- * absent here is rejected on upload and invisible in the gallery even if the
- * file is placed in the folder by hand. Notably absent: avif, svg.
+ * Only /api/images/upload gates on this list — it validates the `format` field
+ * against it, so anything absent is rejected outright. Notably absent: avif, svg.
+ *
+ * /api/images/list does NOT use this list. It filters by mime category via a
+ * `type` bitflag (see MEDIA_TYPE_IMAGE_AND_VIDEO in index.js), which is why a
+ * listing must opt into video to see converted .webm files at all. Conflating
+ * the two gates is how converted clips once became invisible to dedup.
  */
 export const ST_MEDIA_EXTENSIONS = new Set([
     '.bmp', '.png', '.jpg', '.jpeg', '.jfif', '.gif', '.webp',

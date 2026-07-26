@@ -3,7 +3,7 @@
 ## Problem
 
 Some Chub cards embed animated AVIF files. SillyTavern renders them fine in chat, but they never
-reach the character gallery — and copying one into the gallery folder by hand doesn't work either.
+reach the character gallery.
 
 The cause is a server-side allowlist, not a rendering limitation. ST's `src/constants.js` defines:
 
@@ -11,14 +11,28 @@ The cause is a server-side allowlist, not a rendering limitation. ST's `src/cons
 MEDIA_EXTENSIONS = [bmp, png, jpg, webp, jpeg, jfif, gif, mp4, avi, mov, wmv, flv, webm, 3gp, mkv, mpg, mp3, ...]
 ```
 
-`avif` is absent. Two consequences:
+`avif` is absent, and `POST /api/images/upload` validates its `format` field against that list, so
+the extension's upload of an AVIF is rejected and lands in the `failed` counter. That alone makes
+conversion necessary.
 
-- `POST /api/images/upload` validates `format` against that list, so the extension's upload of an
-  AVIF fails and lands in the `failed` counter.
-- `POST /api/images/list` filters by the same list, so a manually placed `.avif` is invisible to the
-  gallery.
+Chat messages bypass the allowlist entirely — they render through a plain `<img>` tag.
 
-Chat messages bypass both — they render through a plain `<img>` tag with no allowlist involved.
+**Correction to an earlier draft of this spec.** That draft also claimed `POST /api/images/list`
+filters by `MEDIA_EXTENSIONS`, making a hand-placed `.avif` invisible to the gallery. That is wrong.
+`/list` gates on **mime category via a `type` bitflag** (`src/util.js` `getImages` checks
+`mime.lookup(file).startsWith('image/')` and friends), not on `MEDIA_EXTENSIONS`. ST depends on
+`mime-types` v3, whose mime-db maps `avif` → `image/avif`, so `.avif` does pass the listing filter.
+
+Two things follow. First, the originally reported symptom — a manually added `.avif` not appearing —
+is not explained by the listing filter, and its real cause remains unconfirmed (a gallery needing a
+reopen to re-list, an older ST whose `getImages` filtered by extension, or nanogallery2's thumbnail
+handling are all plausible). It does not affect this design, because the upload gate is what blocks
+the extension. Second, and more consequentially, believing `/list` gated on `MEDIA_EXTENSIONS`
+directly produced a bug during implementation: `getExistingGalleryHashes` requested no `type`, ST
+defaulted to images-only, and converted `.webm` files were therefore absent from the listing that
+cross-run dedup depends on — so every re-import would have re-converted and re-added every clip, and
+because ST's upload overwrites identical paths without disambiguation, could have overwritten them.
+See `MEDIA_TYPE_IMAGE_AND_VIDEO` in `index.js`.
 
 ## What these files actually are
 
