@@ -172,13 +172,28 @@ export const ST_MEDIA_EXTENSIONS = new Set([
 ]);
 
 /**
- * The video entries within ST_MEDIA_EXTENSIONS. This extension can only ever produce
- * still images or converted WebM as *downloads* of source bytes — it never downloads
- * video — so a file with one of these extensions can never content-hash-match anything
- * this extension fetches. Hashing it would be wasted work.
+ * Video extensions worth skipping when hashing an existing gallery folder.
+ *
+ * This extension never downloads video — the URL regex and MIME map cover still
+ * formats only — so a video file's content hash can never match anything fetched
+ * from Chub. Hashing one is a wasted download plus digest, potentially of a very
+ * large file.
+ *
+ * Scoped to what `/api/images/list` can actually return, NOT to ST_MEDIA_EXTENSIONS.
+ * Those are different vocabularies: the upload endpoint gates on MEDIA_EXTENSIONS,
+ * while the listing gates on mime category, and mime-db knows more video extensions
+ * than ST's upload allowlist does. Conflating the two gates is what made converted
+ * clips invisible to dedup once already — hence the extra entries below, which are
+ * absent from MEDIA_EXTENSIONS but do resolve to video/* in a listing.
+ *
+ * A miss here costs wasted work, never a wrong dedup decision, so erring long is safe.
  */
 export const VIDEO_EXTENSIONS = new Set([
+    // present in ST's MEDIA_EXTENSIONS
     '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.3gp', '.mkv', '.mpg',
+    // absent there, but still video/* by mime lookup
+    '.mpeg', '.m4v', '.ts', '.ogv', '.qt', '.3g2', '.asf', '.f4v', '.mks', '.mk3d',
+    '.m1v', '.m2v',
 ]);
 
 /** True for formats we both need to convert and know how to convert. */

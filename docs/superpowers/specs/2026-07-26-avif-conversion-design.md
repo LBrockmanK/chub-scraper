@@ -113,7 +113,7 @@ here; the implementation is correct for sizes below 2^49 and the tests document 
 ### `avif.js` — the browser half
 
 ```
-hasWebCodecs()              → boolean, cached per session
+hasWebCodecs()              → boolean, three typeof checks, not cached
 convertAvif(buffer, onProgress) → { buffer, ext, kind }   // kind: 'video' | 'still'
 ```
 
@@ -176,7 +176,10 @@ filename marker. Filenames are not user-facing in the gallery UI, so the cosmeti
 ## Encoder settings
 
 - **Codec:** `vp09.00.10.08`, falling back to `vp8` when `VideoEncoder.isConfigSupported` rejects it.
-  Probed once per session and cached.
+  Probed at a nominal size, since support does not vary by resolution. Only a *successful* probe is
+  cached for the session — a null result is deliberately not memoized, so one transient
+  `isConfigSupported` failure cannot condemn every remaining clip in the run to the still-frame path.
+  That matters because a still, once written, is permanent for that gallery.
 - **Bitrate:** `clamp(width × height × fps × 0.1, 400_000, 4_000_000)`. For `g3.avif` that is
   ~1.18 Mbps, giving roughly 0.77 MB against a 0.93 MB source. The prototype's flat 2 Mbps produced
   output 1.22× *larger* than source, which is the wrong side of parity for a local gallery.
