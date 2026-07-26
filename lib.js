@@ -29,7 +29,7 @@ export function extractImagesFromHtml(html, fieldName) {
     for (const m of html.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)) {
         add(m[1], fieldName);
     }
-    for (const m of html.matchAll(/https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)(?=[?#\s"'<>)]|$)/gi)) {
+    for (const m of html.matchAll(/https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|avif)(?=[?#\s"'<>)]|$)/gi)) {
         add(m[0], fieldName);
     }
 
@@ -171,6 +171,16 @@ export const ST_MEDIA_EXTENSIONS = new Set([
     '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.3gp', '.mkv', '.mpg',
 ]);
 
+/**
+ * The video entries within ST_MEDIA_EXTENSIONS. This extension can only ever produce
+ * still images or converted WebM as *downloads* of source bytes — it never downloads
+ * video — so a file with one of these extensions can never content-hash-match anything
+ * this extension fetches. Hashing it would be wasted work.
+ */
+export const VIDEO_EXTENSIONS = new Set([
+    '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.3gp', '.mkv', '.mpg',
+]);
+
 /** True for formats we both need to convert and know how to convert. */
 export function needsConversion(ext) {
     return ext === '.avif';
@@ -188,13 +198,16 @@ export function appendHashMarker(filename, marker) {
  * Cross-run dedup for converted images.
  *
  * A converted file's bytes never hash to its source's hash, so the source hash
- * rides along in the filename instead. Matching on `_marker.` keeps the marker
- * anchored to the suffix position.
+ * rides along in the filename instead. The marker must end the stem (the part of
+ * the filename before the final extension) — anything before an earlier dot in a
+ * user-added file like `clip_a1b2c3d4.old.mp4` does not count as a match.
  */
 export function filenamesContainMarker(filenames, marker) {
-    const needle = `_${marker}.`;
+    const suffix = `_${marker}`;
     for (const name of filenames) {
-        if (name.includes(needle)) return true;
+        const dot = name.lastIndexOf('.');
+        const stem = dot === -1 ? name : name.slice(0, dot);
+        if (stem.endsWith(suffix)) return true;
     }
     return false;
 }

@@ -113,7 +113,7 @@ here; the implementation is correct for sizes below 2^49 and the tests document 
 ### `avif.js` — the browser half
 
 ```
-isAvifConvertible()        → boolean, cached per session
+hasWebCodecs()              → boolean, cached per session
 convertAvif(buffer, onProgress) → { buffer, ext, kind }   // kind: 'video' | 'still'
 ```
 
@@ -191,13 +191,24 @@ filename marker. Filenames are not user-facing in the gallery UI, so the cosmeti
 
 ## Still-frame fallback
 
-Produces a PNG from frame 0 via `OffscreenCanvas` → `convertToBlob({ type: 'image/png' })`. Uses only
-canvas, so it works anywhere ST does. Triggered by:
+Produces a PNG from frame 0 via `OffscreenCanvas` → `convertToBlob({ type: 'image/png' })`. This
+narrows the reach versus plain `<canvas>.toBlob`: a browser with `VideoEncoder` but without the full
+`OffscreenCanvas` surface still lands on `failed++` rather than a still. The degradation is contained
+by the per-image catch in `fetchAndImportImages`, so one such browser costs a failed image, not the
+run. Triggered by:
 
 - a non-animated AVIF (`track.animated === false`) — no video needed
 - `ImageDecoder` or `VideoEncoder` unavailable
 - any throw inside the video path, including mux failure
 - exceeding a sanity limit
+
+**A landed still is permanent.** Once a clip lands as `description_01_a1b2c3d4.png`, the filename
+marker makes every later import of that card skip it via `filenamesContainMarker` — so the clip is
+never upgraded to WebM later, even by a browser that could convert it. The likeliest cause of a still
+landing at all is not a browser lacking WebCodecs, but a *transient* failure on one clip in an
+otherwise-successful run: the 60 s per-image deadline getting tight on a machine doing software VP9,
+or encoder queue pressure partway through a run of ~15 sequential clips. The recourse is manual:
+delete that `.png` from the gallery folder and re-import the card.
 
 ## Sanity limits
 
@@ -209,7 +220,7 @@ Any of these trips the still-frame fallback rather than grinding the browser:
 
 ## Error handling
 
-- Feature detection guards entry: `ImageDecoder` and `VideoEncoder` defined, and
+- Feature detection guards entry: `ImageDecoder`, `VideoEncoder`, and `OffscreenCanvas` defined, and
   `await ImageDecoder.isTypeSupported('image/avif')`.
 - A failure in the video path degrades to the still path. A failure in the still path increments
   `failed` and the run continues.

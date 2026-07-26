@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
     guessExtension, generateFilename, resolveCollision,
-    ST_MEDIA_EXTENSIONS, needsConversion, appendHashMarker, filenamesContainMarker,
+    ST_MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, needsConversion, appendHashMarker, filenamesContainMarker,
 } from '../lib.js';
 
 describe('guessExtension', () => {
@@ -160,6 +160,18 @@ describe('ST_MEDIA_EXTENSIONS', () => {
     });
 });
 
+describe('VIDEO_EXTENSIONS', () => {
+    it('contains video formats', () => {
+        assert.ok(VIDEO_EXTENSIONS.has('.mp4'));
+        assert.ok(VIDEO_EXTENSIONS.has('.webm'));
+    });
+
+    it('does not contain still-image formats', () => {
+        assert.equal(VIDEO_EXTENSIONS.has('.png'), false);
+        assert.equal(VIDEO_EXTENSIONS.has('.jpeg'), false);
+    });
+});
+
 describe('needsConversion', () => {
     it('is true for avif', () => {
         assert.equal(needsConversion('.avif'), true);
@@ -215,5 +227,15 @@ describe('filenamesContainMarker', () => {
 
     it('is false for an empty collection', () => {
         assert.equal(filenamesContainMarker(new Set(), 'a1b2c3d4'), false);
+    });
+
+    it('does not match a marker that only appears before an earlier dot', () => {
+        const existing = new Set(['clip_a1b2c3d4.old.mp4']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), false);
+    });
+
+    it('matches an extensionless filename ending in the marker', () => {
+        const existing = new Set(['gallery_01_a1b2c3d4']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), true);
     });
 });

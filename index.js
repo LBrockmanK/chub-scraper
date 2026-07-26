@@ -6,6 +6,7 @@ import {
     needsConversion,
     appendHashMarker,
     filenamesContainMarker,
+    VIDEO_EXTENSIONS,
 } from './lib.js';
 import { convertAvif } from './avif.js';
 
@@ -87,9 +88,11 @@ async function getExistingGalleryHashes(galleryFolder) {
         filenames.add(file);
         // Content-hash dedup only ever compares against files downloaded from Chub, and this
         // extension never downloads video (URL regex and MIME map only cover still formats), so
-        // a .webm's hash can never match anything. Skip the fetch-and-hash for it entirely —
+        // a video file's hash can never match anything. Skip the fetch-and-hash for it entirely —
         // its filename (added above) is all the marker-based dedup path needs.
-        if (file.toLowerCase().endsWith('.webm')) continue;
+        const dot = file.lastIndexOf('.');
+        const ext = dot === -1 ? '' : file.slice(dot).toLowerCase();
+        if (VIDEO_EXTENSIONS.has(ext)) continue;
         try {
             const imgResp = await fetch(`user/images/${galleryFolder}/${file}`);
             if (!imgResp.ok) continue;

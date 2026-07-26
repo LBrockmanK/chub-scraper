@@ -2,9 +2,9 @@
  * AVIF conversion for the SillyTavern gallery.
  *
  * SillyTavern's MEDIA_EXTENSIONS allowlist has no entry for avif, so an AVIF is
- * rejected on upload and invisible in the gallery listing. Animated AVIFs become
- * VP9 WebM (a format the gallery already thumbnails and plays); anything else,
- * or any failure along the way, becomes a first-frame PNG.
+ * rejected on upload. Animated AVIFs become VP9 WebM (a format the gallery already
+ * thumbnails and plays); anything else, or any failure along the way, becomes a
+ * first-frame PNG.
  *
  * Browser globals are referenced only inside function bodies so this module
  * stays importable in Node for unit testing.
@@ -100,7 +100,13 @@ async function selectCodec() {
             return null;
         })();
     }
-    return codecPromise;
+    const result = await codecPromise;
+    // A null result means every candidate failed, which can happen from a transient
+    // fault (isConfigSupported throwing) rather than genuine lack of support. Don't
+    // memoize that outcome — a permanently cached null would force every later clip
+    // in the session down the still-frame path even after the transient fault clears.
+    if (result === null) codecPromise = null;
+    return result;
 }
 
 /**
@@ -192,6 +198,10 @@ async function encodeAnimation(decoder, track, onProgress) {
             chunks,
             codec: selected.codecId,
         });
+        // Safe only because concatBytes (webm.js) always allocates a new exact-size
+        // array: byteOffset is 0 and the view spans the whole buffer. A subarray view
+        // here would make arrayBufferToBase64 (index.js) silently append trailing
+        // garbage from the backing buffer.
         return { buffer: webm.buffer, ext: '.webm', kind: 'video' };
     } finally {
         if (encoder.state !== 'closed') encoder.close();

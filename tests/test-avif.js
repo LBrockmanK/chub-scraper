@@ -33,6 +33,14 @@ describe('exceedsLimits', () => {
     it('rejects an oversized frame area', () => {
         assert.equal(exceedsLimits({ frameCount: 2, width: 8192, height: 8192 }), true);
     });
+
+    it('accepts exactly the pixel-area ceiling', () => {
+        assert.equal(exceedsLimits({ frameCount: 2, width: 4096, height: 4096 }), false);
+    });
+
+    it('rejects one pixel row past the pixel-area ceiling', () => {
+        assert.equal(exceedsLimits({ frameCount: 2, width: 4096, height: 4098 }), true);
+    });
 });
 
 describe('evenAlign', () => {
