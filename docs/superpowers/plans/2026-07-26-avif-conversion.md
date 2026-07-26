@@ -385,12 +385,26 @@ describe('buildWebM', () => {
             durationMs: 1280 * FRAME_US / 1000, chunks,
         });
         const segment = childrenOf(webm).find(c => c.id === '18538067');
-        for (const cluster of findAll(segment.data, '1f43b675')) {
+        const clusters = findAll(segment.data, '1f43b675');
+
+        // Do NOT assert `rel >= -32768 && rel <= 32767` here — getInt16 returns a signed
+        // 16-bit interpretation of two bytes, so that can never fail. The real failure mode
+        // is a WRAPPED NEGATIVE offset, which is what these assertions catch. An earlier
+        // draft of this plan shipped the tautology, and deleting MAX_CLUSTER_SPAN_MS from
+        // webm.js entirely left the suite green.
+        assert.equal(clusters.length, 2);
+
+        let chunkIndex = 0;
+        for (const cluster of clusters) {
+            const baseMs = readUint(find(cluster.data, 'e7').data);
             for (const block of findAll(cluster.data, 'a3')) {
                 const rel = new DataView(block.data.buffer, block.data.byteOffset).getInt16(1);
-                assert.ok(rel >= -32768 && rel <= 32767, `relative timestamp out of range: ${rel}`);
+                assert.ok(rel >= 0, `relative timestamp went negative: ${rel}`);
+                assert.equal(baseMs + rel, Math.round(chunks[chunkIndex].timestampUs / 1000));
+                chunkIndex++;
             }
         }
+        assert.equal(chunkIndex, chunks.length);
     });
 });
 ```
@@ -1339,13 +1353,40 @@ export async function verifyAvifConversion(baseUrl) {
 
 - [ ] **Step 2: Run the harness in the browser**
 
-Serve the extension folder and run the harness. From the repo root:
+Serve the extension folder and run the harness.
 
-```bash
-python -m http.server 8765
+**Do not use `python -m http.server`.** On Windows it reads MIME types from the registry, where `.js`
+is commonly mapped to `text/plain`, and browsers refuse to execute an ES module served with a
+non-JavaScript MIME type. This was hit during execution and cost real debugging time. Use a server
+that forces the mapping — save this as `serve.py` outside the repo and run it from anywhere:
+
+```python
+import functools, sys
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+SimpleHTTPRequestHandler.extensions_map.update({'.js': 'text/javascript', '.mjs': 'text/javascript'})
+
+handler = functools.partial(SimpleHTTPRequestHandler, directory=sys.argv[1])
+ThreadingHTTPServer(('127.0.0.1', int(sys.argv[2])), handler).serve_forever()
 ```
 
-Then in the browser at `http://localhost:8765`, in the console:
+```bash
+python serve.py . 8766
+```
+
+Confirm the MIME type before loading anything in the browser — this one check prevents the whole
+failure mode:
+
+```bash
+curl -s -o /dev/null -w "%{content_type}\n" http://localhost:8766/avif.js
+```
+
+Expected: `text/javascript`. If you have already loaded any module from this port under a wrong MIME
+type, the browser has cached it and will keep failing even after you fix the server — a relative
+import like `avif.js`'s `./webm.js` resolves to the un-busted URL and hits the poisoned cache entry.
+Switch to a fresh port rather than fighting the cache.
+
+Then in the browser at `http://localhost:8766`, in the console:
 
 ```javascript
 const { verifyAvifConversion } = await import('/tests/browser/verify-avif.js');
@@ -1362,7 +1403,7 @@ silently retuning.
 In the same console:
 
 ```javascript
-const { extractStillFrame } = await import('/avif.js');
+const { extractStillFrame } = await import('/avif.js');  // served from port 8766, see Step 2
 const src = await (await fetch('https://waking-up-naked-next-to-a-verry-happy-elf.pages.dev/g3.avif')).arrayBuffer();
 const still = await extractStillFrame(src);
 const header = new Uint8Array(still.buffer).subarray(0, 4);
