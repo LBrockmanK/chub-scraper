@@ -179,7 +179,7 @@ filename marker. Filenames are not user-facing in the gallery UI, so the cosmeti
   Probed at a nominal size, since support does not vary by resolution. Only a *successful* probe is
   cached for the session — a null result is deliberately not memoized, so one transient
   `isConfigSupported` failure cannot condemn every remaining clip in the run to the still-frame path.
-  That matters because a still, once written, is permanent for that gallery.
+  Such a still is classified retryable, so a re-run recovers it — see "Final versus retryable stills".
 - **Bitrate:** `clamp(width × height × fps × 0.1, 400_000, 4_000_000)`. For `g3.avif` that is
   ~1.18 Mbps, giving roughly 0.77 MB against a 0.93 MB source. The prototype's flat 2 Mbps produced
   output 1.22× *larger* than source, which is the wrong side of parity for a local gallery.
@@ -205,13 +205,45 @@ run. Triggered by:
 - any throw inside the video path, including mux failure
 - exceeding a sanity limit
 
-**A landed still is permanent.** Once a clip lands as `description_01_a1b2c3d4.png`, the filename
-marker makes every later import of that card skip it via `filenamesContainMarker` — so the clip is
-never upgraded to WebM later, even by a browser that could convert it. The likeliest cause of a still
-landing at all is not a browser lacking WebCodecs, but a *transient* failure on one clip in an
+### Final versus retryable stills
+
+Not every still means the same thing, and treating them alike was a real defect: the first version
+marked all of them as done, so a single bad run permanently blocked the real conversion. `convertAvif`
+now returns `reason` and `retryable` alongside `kind`.
+
+| reason | retryable | meaning |
+| --- | --- | --- |
+| `not-animated` | no | The source is a static AVIF. The still IS the answer. |
+| `too-large` | no | Beyond `AVIF_LIMITS`. Deterministic — no browser or retry will do better. |
+| `no-webcodecs` | yes | This browser lacks `ImageDecoder`/`VideoEncoder`/`OffscreenCanvas`. |
+| `avif-decode-unsupported` | yes | WebCodecs present but it will not decode AVIF. |
+| `encode-failed` | yes | Something threw: decode error, encoder error, or the 60 s deadline. |
+
+`too-large` is distinguished from a generic throw by a dedicated `AvifTooLargeError`, because only
+that one is guaranteed to recur.
+
+**Final stills** are named `description_01_a1b2c3d4.png` — the marker ends the stem, so
+`filenamesContainMarker` matches and later imports skip them. Correct: the answer will not improve.
+
+**Retryable stills** get `POSTER_SUFFIX` appended *after* the marker:
+`description_01_a1b2c3d4_poster.png`. That shifts the marker off the end of the stem, so
+`filenamesContainMarker` deliberately does **not** match, and a later run in a capable browser
+converts the clip properly rather than skipping it forever. To stop a permanently-incapable browser
+from accumulating a fresh poster on every import, `filenamesContainPoster` is checked first and at
+most one poster per source clip is ever written.
+
+A retried clip that succeeds lands its `.webm` alongside the poster. Both remain — append-only means
+the stale poster is never deleted, which is a deliberate trade: a redundant image is recoverable, a
+deleted one is not.
+
+The UI must not report a degraded result as plain success. Alongside the normal info toast, a
+`posters > 0` run raises a warning toast naming the reasons and stating that a re-run will retry,
+and each failure is logged with its reason.
+
+The likeliest trigger is not a browser lacking WebCodecs but a *transient* failure on one clip in an
 otherwise-successful run: the 60 s per-image deadline getting tight on a machine doing software VP9,
-or encoder queue pressure partway through a run of ~15 sequential clips. The recourse is manual:
-delete that `.png` from the gallery folder and re-import the card.
+or encoder queue pressure partway through ~15 sequential clips. That is precisely the case the
+retryable path exists to recover from.
 
 ## Sanity limits
 

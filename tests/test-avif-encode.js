@@ -245,6 +245,77 @@ describe('encodeAnimation frame handling (via convertAvif)', () => {
         assert.equal(stubState.configured.height, 606);
     });
 
+    it('marks a successful conversion with neither a reason nor retryable', async () => {
+        const decoder = new StubImageDecoder({
+            frameCount: 4, width: 608, height: 608, duration: FRAME_DURATION_US,
+        });
+        globalThis.ImageDecoder = class {
+            static async isTypeSupported() { return true; }
+            constructor() { return decoder; }
+        };
+
+        const result = await avif.convertAvif(new ArrayBuffer(64));
+
+        assert.equal(result.kind, 'video');
+        assert.equal(result.retryable, undefined);
+    });
+
+    it('classifies a non-animated AVIF as a final, non-retryable still', async () => {
+        globalThis.ImageDecoder = class {
+            static async isTypeSupported() { return true; }
+            constructor() {
+                return {
+                    tracks: { ready: Promise.resolve(), length: 1, selectedTrack: { animated: false, frameCount: 1 } },
+                    async decode() { throw new Error('should not decode a static AVIF'); },
+                    close() {},
+                };
+            }
+        };
+
+        const result = await avif.convertAvif(new ArrayBuffer(64));
+
+        assert.equal(result.kind, 'still');
+        assert.equal(result.reason, 'not-animated');
+        assert.equal(result.retryable, false, 'a static AVIF still is the correct final answer');
+    });
+
+    it('classifies an encode failure as retryable so a later run can upgrade it', async () => {
+        const decoder = new StubImageDecoder({
+            frameCount: 6, width: 608, height: 608, duration: FRAME_DURATION_US,
+        });
+        globalThis.ImageDecoder = class {
+            static async isTypeSupported() { return true; }
+            constructor() { return decoder; }
+        };
+        const RealEncoder = globalThis.VideoEncoder;
+        globalThis.VideoEncoder = class extends RealEncoder {
+            encode() { throw new Error('simulated encoder explosion'); }
+        };
+        globalThis.VideoEncoder.isConfigSupported = RealEncoder.isConfigSupported;
+
+        try {
+            const result = await avif.convertAvif(new ArrayBuffer(64));
+            assert.equal(result.kind, 'still');
+            assert.equal(result.reason, 'encode-failed');
+            assert.equal(result.retryable, true);
+        } finally {
+            globalThis.VideoEncoder = RealEncoder;
+        }
+    });
+
+    it('classifies a missing WebCodecs surface as retryable', async () => {
+        const RealImageDecoder = globalThis.ImageDecoder;
+        delete globalThis.ImageDecoder;
+        try {
+            const result = await avif.convertAvif(new ArrayBuffer(64));
+            assert.equal(result.kind, 'still');
+            assert.equal(result.reason, 'no-webcodecs');
+            assert.equal(result.retryable, true, 'another browser could convert this');
+        } finally {
+            globalThis.ImageDecoder = RealImageDecoder;
+        }
+    });
+
     it('falls back to a still frame when the clip exceeds the frame limit', async () => {
         const decoder = new StubImageDecoder({
             frameCount: 1500, width: 608, height: 608, duration: FRAME_DURATION_US,
@@ -265,6 +336,9 @@ describe('encodeAnimation frame handling (via convertAvif)', () => {
 
         assert.equal(result.kind, 'still');
         assert.equal(result.ext, '.png');
+        // Deterministic: no browser will ever convert this, so the still is final.
+        assert.equal(result.reason, 'too-large');
+        assert.equal(result.retryable, false);
         // The limit must be caught without decoding all 1500 frames.
         assert.ok(decoder.decodeLog.length <= 1, `decoded ${decoder.decodeLog.length} frames before rejecting`);
     });

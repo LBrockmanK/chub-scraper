@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import {
     guessExtension, generateFilename, resolveCollision,
     ST_MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, needsConversion, appendHashMarker, filenamesContainMarker,
+    filenamesContainPoster, POSTER_SUFFIX,
 } from '../lib.js';
 
 describe('guessExtension', () => {
@@ -237,5 +238,35 @@ describe('filenamesContainMarker', () => {
     it('matches an extensionless filename ending in the marker', () => {
         const existing = new Set(['gallery_01_a1b2c3d4']);
         assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), true);
+    });
+});
+
+describe('POSTER_SUFFIX and filenamesContainPoster', () => {
+    it('a poster name does NOT satisfy the video dedup check', () => {
+        // This is the whole point: a degraded still must never mark the clip as done,
+        // or one bad run permanently blocks the real conversion.
+        const poster = appendHashMarker('gallery_01.png', `a1b2c3d4${POSTER_SUFFIX}`);
+        assert.equal(poster, 'gallery_01_a1b2c3d4_poster.png');
+        assert.equal(filenamesContainMarker(new Set([poster]), 'a1b2c3d4'), false);
+    });
+
+    it('recognizes an existing poster for the same source', () => {
+        const existing = new Set(['gallery_01_a1b2c3d4_poster.png']);
+        assert.equal(filenamesContainPoster(existing, 'a1b2c3d4'), true);
+    });
+
+    it('does not confuse a converted video with a poster', () => {
+        const existing = new Set(['gallery_01_a1b2c3d4.webm']);
+        assert.equal(filenamesContainPoster(existing, 'a1b2c3d4'), false);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), true);
+    });
+
+    it('is false for a poster belonging to a different source', () => {
+        const existing = new Set(['gallery_01_ffffffff_poster.png']);
+        assert.equal(filenamesContainPoster(existing, 'a1b2c3d4'), false);
+    });
+
+    it('handles an extensionless poster name', () => {
+        assert.equal(filenamesContainPoster(new Set(['gallery_01_a1b2c3d4_poster']), 'a1b2c3d4'), true);
     });
 });

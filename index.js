@@ -6,6 +6,8 @@ import {
     needsConversion,
     appendHashMarker,
     filenamesContainMarker,
+    filenamesContainPoster,
+    POSTER_SUFFIX,
     VIDEO_EXTENSIONS,
 } from './lib.js';
 import { convertAvif } from './avif.js';
@@ -152,7 +154,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
 
     const imageEntries = extractRawImageUrls(node, galleryUrls);
     if (imageEntries.length === 0) {
-        return { added: 0, skipped: 0, failed: 0, converted: 0, stills: 0, total: 0 };
+        return { added: 0, skipped: 0, failed: 0, converted: 0, stills: 0, posters: 0, posterReasons: [], total: 0 };
     }
 
     onProgress(`Found ${imageEntries.length} image(s). Checking existing gallery...`);
@@ -166,6 +168,8 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
     let failed = 0;
     let converted = 0;
     let stills = 0;
+    let posters = 0;
+    const posterReasons = new Set();
 
     for (let i = 0; i < imageEntries.length; i++) {
         const entry = imageEntries[i];
@@ -193,6 +197,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
             let uploadBuffer = buffer;
             let uploadExt = sourceExt;
             let convertedKind = null;
+            let isPoster = false;
             if (convert) {
                 const result = await convertAvif(buffer, (frame, total) => {
                     onProgress(`Converting ${i + 1}/${imageEntries.length} (frame ${frame}/${total})...`);
@@ -200,10 +205,25 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
                 uploadBuffer = result.buffer;
                 uploadExt = result.ext;
                 convertedKind = result.kind;
+                // A retryable still is a degradation, not an answer. It gets a poster
+                // marker so it never satisfies dedup, letting a later run in a capable
+                // browser convert the clip properly.
+                isPoster = result.retryable === true;
+                if (isPoster) {
+                    posterReasons.add(result.reason);
+                    // At most one poster per source clip — otherwise a browser that can
+                    // never convert would add a fresh one on every import.
+                    if (filenamesContainPoster(existingNames, marker)) {
+                        skipped++;
+                        continue;
+                    }
+                }
             }
 
             let filename = generateFilename(entry.source, sourceCounters, uploadExt);
-            if (convert) filename = appendHashMarker(filename, marker);
+            if (convert) {
+                filename = appendHashMarker(filename, isPoster ? `${marker}${POSTER_SUFFIX}` : marker);
+            }
             filename = resolveCollision(filename, existingNames, contentHash);
             existingNames.add(filename);
 
@@ -214,6 +234,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
             await uploadToGallery(base64, formatWithoutDot, galleryFolder, nameWithoutExt);
             added++;
             if (convertedKind === 'video') converted++;
+            else if (isPoster) posters++;
             else if (convertedKind === 'still') stills++;
         } catch (err) {
             if (err instanceof CorsProxyDisabledError) throw err;
@@ -222,7 +243,11 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
         }
     }
 
-    return { added, skipped, failed, converted, stills, total: imageEntries.length };
+    return {
+        added, skipped, failed, converted, stills, posters,
+        posterReasons: [...posterReasons],
+        total: imageEntries.length,
+    };
 }
 
 // --- UI ---
@@ -286,6 +311,7 @@ function injectButton(galleryElement) {
                 const detail = [];
                 if (result.converted > 0) detail.push(`${result.converted} converted`);
                 if (result.stills > 0) detail.push(`${result.stills} as still frames`);
+                if (result.posters > 0) detail.push(`${result.posters} poster only`);
                 parts.push(detail.length > 0
                     ? `${result.added} added (${detail.join(', ')})`
                     : `${result.added} added`);
@@ -295,6 +321,18 @@ function injectButton(galleryElement) {
             if (result.total === 0) parts.push('No images on Chub');
 
             toastr.info(parts.join(', '), 'Chub Gallery Scraper');
+
+            // A degraded conversion must not read as plain success. Say what happened,
+            // why, and that a retry can still fix it.
+            if (result.posters > 0) {
+                toastr.warning(
+                    `${result.posters} animated clip(s) could not be converted to video `
+                    + `(${result.posterReasons.join(', ')}) — imported as a still frame instead. `
+                    + 'Re-run the import to try again; these are not marked as done.',
+                    'Chub Gallery Scraper',
+                    { timeOut: 12000 },
+                );
+            }
 
             if (result.added > 0) {
                 closeGallery();

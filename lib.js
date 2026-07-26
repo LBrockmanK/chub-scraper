@@ -226,3 +226,29 @@ export function filenamesContainMarker(filenames, marker) {
     }
     return false;
 }
+
+/**
+ * Appended to a *degraded* still's marker, e.g. `gallery_01_a1b2c3d4_poster.png`.
+ *
+ * The whole point is that this shifts the marker off the end of the stem, so
+ * `filenamesContainMarker` does NOT match it. A poster therefore never satisfies
+ * cross-run dedup, and a later run in a capable browser still converts the clip
+ * properly instead of skipping it forever.
+ */
+export const POSTER_SUFFIX = '_poster';
+
+/**
+ * Whether a degraded poster already exists for this source.
+ *
+ * Checked so a browser that can never convert writes at most ONE poster per clip
+ * rather than accumulating a new one on every import.
+ */
+export function filenamesContainPoster(filenames, marker) {
+    const suffix = `_${marker}${POSTER_SUFFIX}`;
+    for (const name of filenames) {
+        const dot = name.lastIndexOf('.');
+        const stem = dot === -1 ? name : name.slice(0, dot);
+        if (stem.endsWith(suffix)) return true;
+    }
+    return false;
+}

@@ -39,6 +39,20 @@ export function evenAlign(width, height) {
     return { width: width - (width % 2), height: height - (height % 2) };
 }
 
+/**
+ * Thrown when a clip is beyond AVIF_LIMITS.
+ *
+ * Distinct from a generic failure because it is deterministic: no browser and no
+ * retry will convert this clip, so its still frame is the final answer rather than
+ * a degraded one.
+ */
+class AvifTooLargeError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'AvifTooLargeError';
+    }
+}
+
 /** Whether this browser can decode AVIF frames and encode video. */
 export function hasWebCodecs() {
     return typeof ImageDecoder !== 'undefined'
@@ -151,7 +165,7 @@ async function encodeAnimation(decoder, track, onProgress) {
                     frameDurationUs = image.duration || FALLBACK_FRAME_DURATION_US;
 
                     if (exceedsLimits({ frameCount, width, height })) {
-                        throw new Error(
+                        throw new AvifTooLargeError(
                             `AVIF exceeds conversion limits: ${frameCount} frames at ${width}x${height}`,
                         );
                     }
@@ -230,14 +244,28 @@ async function encodeAnimation(decoder, track, onProgress) {
 /**
  * Convert an AVIF into something the SillyTavern gallery accepts.
  *
- * Animated input becomes WebM. Static input, a browser without WebCodecs, or any
- * failure in the video path becomes a first-frame PNG. Only a failure of the
- * still path throws — the caller counts that as a failed image.
+ * Animated input becomes WebM. Everything else becomes a first-frame PNG, tagged
+ * with WHY — because that determines whether the result is final or should be
+ * retried later.
+ *
+ * `retryable: false` means a still is the correct, final answer: the source is not
+ * animated, or it is too large to convert on any machine. `retryable: true` means
+ * this run could not do better but another could — a browser without WebCodecs, or
+ * a transient decode/encode failure. The caller must not let a retryable still
+ * satisfy cross-run dedup, or one bad run permanently blocks the real conversion.
+ *
+ * Only a failure of the still path itself throws; the caller counts that as failed.
  *
  * @param {ArrayBuffer} buffer Original AVIF bytes.
  * @param {(frame: number, total: number) => void} [onProgress]
+ * @returns {Promise<{buffer: ArrayBuffer, ext: string, kind: 'video'|'still',
+ *                    reason?: string, retryable?: boolean, error?: Error}>}
  */
 export async function convertAvif(buffer, onProgress) {
+    let reason = 'no-webcodecs';
+    let retryable = true;
+    let error = null;
+
     if (hasWebCodecs()) {
         let decoder = null;
         try {
@@ -248,12 +276,26 @@ export async function convertAvif(buffer, onProgress) {
                 if (track?.animated && track.frameCount > 1) {
                     return await encodeAnimation(decoder, track, onProgress);
                 }
+                reason = 'not-animated';
+                retryable = false;
+            } else {
+                reason = 'avif-decode-unsupported';
             }
         } catch (err) {
-            console.warn('[Chub Gallery] AVIF video conversion failed, using still frame:', err);
+            error = err;
+            const tooLarge = err instanceof AvifTooLargeError;
+            reason = tooLarge ? 'too-large' : 'encode-failed';
+            retryable = !tooLarge;
+            console.warn(
+                `[Chub Gallery] AVIF conversion failed (${reason}), using still frame:`, err,
+            );
         } finally {
             decoder?.close();
         }
     }
-    return extractStillFrame(buffer);
+
+    // Extracted after the decoder is closed, not inside the catch, so the still path
+    // never runs alongside an open decoder.
+    const still = await extractStillFrame(buffer);
+    return { ...still, reason, retryable, error };
 }
