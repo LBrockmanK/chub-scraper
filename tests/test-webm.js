@@ -139,7 +139,6 @@ describe('buildWebM', () => {
         frameDurationUs: FRAME_US,
         durationMs: 167 * FRAME_US / 1000,
         chunks: fakeChunks(167, FRAME_US, 64),
-        codec: 'V_VP9',
     });
 
     it('throws when given no chunks', () => {
@@ -182,12 +181,16 @@ describe('buildWebM', () => {
 
     it('honours a VP8 codec id', () => {
         const webm = buildWebM({
-            width: 64, height: 64, frameDurationUs: FRAME_US, durationMs: 62.5,
+            width: 64, height: 48, frameDurationUs: FRAME_US, durationMs: 62.5,
             chunks: fakeChunks(2, FRAME_US, 64), codec: 'V_VP8',
         });
         const segment = childrenOf(webm).find(c => c.id === '18538067');
         const trackEntry = find(find(segment.data, '1654ae6b').data, 'ae');
         assert.equal(readStr(find(trackEntry.data, '86').data), 'V_VP8');
+
+        const video = find(trackEntry.data, 'e0');
+        assert.equal(readUint(find(video.data, 'b0').data), 64);
+        assert.equal(readUint(find(video.data, 'ba').data), 48);
     });
 
     it('opens a new cluster at each keyframe', () => {
