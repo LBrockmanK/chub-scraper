@@ -206,6 +206,12 @@ describe('buildWebM', () => {
         const clusters = findAll(segment.data, '1f43b675');
         const blocks = clusters.flatMap(c => findAll(c.data, 'a3'));
         assert.equal(blocks.length, 167);
+
+        // fakeChunks sets data[0] = i & 0xff, and the SimpleBlock payload
+        // starts 4 bytes in (after the block header), so each frame's index
+        // is recoverable from its block and can be checked for order/dupes.
+        const frameIndices = blocks.map((b) => b.data[4]);
+        assert.deepEqual(frameIndices, Array.from({ length: 167 }, (_, i) => i));
     });
 
     it('writes SimpleBlocks with track number, relative timestamp and keyframe flag', () => {
@@ -232,10 +238,23 @@ describe('buildWebM', () => {
             durationMs: 1280 * FRAME_US / 1000, chunks,
         });
         const segment = childrenOf(webm).find(c => c.id === '18538067');
-        for (const cluster of findAll(segment.data, '1f43b675')) {
+        const clusters = findAll(segment.data, '1f43b675');
+
+        // A wrapped int16 offset would still satisfy a plain range check, so
+        // pin down the split itself: exactly two clusters, every relative
+        // offset non-negative, and clusterBaseMs + rel reconstructing the
+        // original chunk timestamp (which fails if the wrap ever occurs).
+        assert.equal(clusters.length, 2);
+
+        let chunkIndex = 0;
+        for (const cluster of clusters) {
+            const clusterBaseMs = readUint(find(cluster.data, 'e7').data);
             for (const block of findAll(cluster.data, 'a3')) {
                 const rel = new DataView(block.data.buffer, block.data.byteOffset).getInt16(1);
-                assert.ok(rel >= -32768 && rel <= 32767, `relative timestamp out of range: ${rel}`);
+                assert.ok(rel >= 0, `relative timestamp went negative: ${rel}`);
+                const expectedMs = Math.round(chunks[chunkIndex].timestampUs / 1000);
+                assert.equal(clusterBaseMs + rel, expectedMs);
+                chunkIndex++;
             }
         }
     });
