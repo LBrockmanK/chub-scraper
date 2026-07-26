@@ -174,16 +174,16 @@ async function encodeAnimation(decoder, track, onProgress) {
                 image.close();
             }
 
-            if (i % PROGRESS_EVERY === 0) onProgress?.(i, frameCount);
+            if (i % PROGRESS_EVERY === 0) onProgress?.(i + 1, frameCount);
             if (encoder.encodeQueueSize > QUEUE_HIGH_WATER) {
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
 
-        onProgress?.(frameCount, frameCount);
         await encoder.flush();
         if (encoderError) throw encoderError;
 
+        onProgress?.(frameCount, frameCount);
         const webm = buildWebM({
             width,
             height,

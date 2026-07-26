@@ -12,6 +12,10 @@ import { convertAvif } from './avif.js';
 const CHUB_API = 'https://api.chub.ai/api/characters';
 const CHUB_GALLERY_API = 'https://gateway.chub.ai/api/gallery/project';
 
+// SillyTavern's MEDIA_REQUEST_TYPE bitflags: IMAGE 0b001 | VIDEO 0b010.
+// Converted clips are .webm, so the listing must include video or dedup can never see them.
+const MEDIA_TYPE_IMAGE_AND_VIDEO = 3;
+
 function stContext() {
     return SillyTavern.getContext();
 }
@@ -71,7 +75,7 @@ async function getExistingGalleryHashes(galleryFolder) {
     const listResp = await fetch('/api/images/list', {
         method: 'POST',
         headers: stContext().getRequestHeaders(),
-        body: JSON.stringify({ folder: galleryFolder }),
+        body: JSON.stringify({ folder: galleryFolder, type: MEDIA_TYPE_IMAGE_AND_VIDEO }),
     });
     if (!listResp.ok) return { hashes: new Set(), filenames: new Set() };
 
@@ -81,6 +85,11 @@ async function getExistingGalleryHashes(galleryFolder) {
 
     for (const file of fileList) {
         filenames.add(file);
+        // Content-hash dedup only ever compares against files downloaded from Chub, and this
+        // extension never downloads video (URL regex and MIME map only cover still formats), so
+        // a .webm's hash can never match anything. Skip the fetch-and-hash for it entirely —
+        // its filename (added above) is all the marker-based dedup path needs.
+        if (file.toLowerCase().endsWith('.webm')) continue;
         try {
             const imgResp = await fetch(`user/images/${galleryFolder}/${file}`);
             if (!imgResp.ok) continue;
@@ -180,14 +189,14 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
 
             let uploadBuffer = buffer;
             let uploadExt = sourceExt;
+            let convertedKind = null;
             if (convert) {
                 const result = await convertAvif(buffer, (frame, total) => {
                     onProgress(`Converting ${i + 1}/${imageEntries.length} (frame ${frame}/${total})...`);
                 });
                 uploadBuffer = result.buffer;
                 uploadExt = result.ext;
-                if (result.kind === 'video') converted++;
-                else stills++;
+                convertedKind = result.kind;
             }
 
             let filename = generateFilename(entry.source, sourceCounters, uploadExt);
@@ -201,6 +210,8 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
 
             await uploadToGallery(base64, formatWithoutDot, galleryFolder, nameWithoutExt);
             added++;
+            if (convertedKind === 'video') converted++;
+            else if (convertedKind === 'still') stills++;
         } catch (err) {
             if (err instanceof CorsProxyDisabledError) throw err;
             console.error(`[Chub Gallery] Failed: ${entry.url}`, err);
