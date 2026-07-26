@@ -114,43 +114,27 @@ async function selectCodec() {
  * Throws on any failure; convertAvif turns that into a still frame.
  */
 async function encodeAnimation(decoder, track, onProgress) {
-    // Dimensions and frame duration come from the decoded first frame rather than
-    // the track, which does not expose them.
-    const first = await decoder.decode({ frameIndex: 0 });
-    const { width, height } = evenAlign(first.image.displayWidth, first.image.displayHeight);
-    const frameDurationUs = first.image.duration || FALLBACK_FRAME_DURATION_US;
-    first.image.close();
-
     const frameCount = track.frameCount;
-    if (exceedsLimits({ frameCount, width, height })) {
-        throw new Error(`AVIF exceeds conversion limits: ${frameCount} frames at ${width}x${height}`);
-    }
 
-    const fps = Math.round(1000000 / frameDurationUs);
-    const selected = await selectCodec();
-    if (!selected) throw new Error('No supported video encoder codec');
-
-    const chunks = [];
+    // Every frame index is decoded EXACTLY ONCE, including frame 0. Firefox's
+    // ImageDecoder caches one VideoFrame per index, so closing it poisons any later
+    // decode of that same index — an earlier version read dimensions from a separate
+    // frame-0 decode, closed it, then hit a closed frame on the loop's first
+    // iteration and fell back to a still for every clip. Chrome returns a fresh
+    // frame each time and hid the bug completely.
+    //
+    // Dimensions and frame duration therefore come from the first loop iteration,
+    // since the track itself does not expose them. That also means the encoder is
+    // configured lazily, inside the loop.
+    let encoder = null;
     let encoderError = null;
-    const encoder = new VideoEncoder({
-        output: (chunk) => {
-            const data = new Uint8Array(chunk.byteLength);
-            chunk.copyTo(data);
-            chunks.push({ data, timestampUs: chunk.timestamp, key: chunk.type === 'key' });
-        },
-        error: (err) => { encoderError = err; },
-    });
+    let width = 0;
+    let height = 0;
+    let frameDurationUs = FALLBACK_FRAME_DURATION_US;
+    let selected = null;
+    const chunks = [];
 
     try {
-        encoder.configure({
-            codec: selected.codec,
-            width,
-            height,
-            bitrate: computeBitrate(width, height, fps),
-            framerate: fps,
-            latencyMode: 'quality',
-        });
-
         const deadline = Date.now() + AVIF_LIMITS.deadlineMs;
         let timestampUs = 0;
 
@@ -162,6 +146,37 @@ async function encodeAnimation(decoder, track, onProgress) {
 
             const { image } = await decoder.decode({ frameIndex: i });
             try {
+                if (i === 0) {
+                    ({ width, height } = evenAlign(image.displayWidth, image.displayHeight));
+                    frameDurationUs = image.duration || FALLBACK_FRAME_DURATION_US;
+
+                    if (exceedsLimits({ frameCount, width, height })) {
+                        throw new Error(
+                            `AVIF exceeds conversion limits: ${frameCount} frames at ${width}x${height}`,
+                        );
+                    }
+
+                    selected = await selectCodec();
+                    if (!selected) throw new Error('No supported video encoder codec');
+
+                    encoder = new VideoEncoder({
+                        output: (chunk) => {
+                            const data = new Uint8Array(chunk.byteLength);
+                            chunk.copyTo(data);
+                            chunks.push({ data, timestampUs: chunk.timestamp, key: chunk.type === 'key' });
+                        },
+                        error: (err) => { encoderError = err; },
+                    });
+                    encoder.configure({
+                        codec: selected.codec,
+                        width,
+                        height,
+                        bitrate: computeBitrate(width, height, Math.round(1000000 / frameDurationUs)),
+                        framerate: Math.round(1000000 / frameDurationUs),
+                        latencyMode: 'quality',
+                    });
+                }
+
                 const duration = image.duration || frameDurationUs;
                 // Re-stamp cumulatively so container timing is ours, and crop to even
                 // dimensions in the same step.
@@ -186,6 +201,8 @@ async function encodeAnimation(decoder, track, onProgress) {
             }
         }
 
+        if (!encoder) throw new Error('AVIF reported frames but none were decoded');
+
         await encoder.flush();
         if (encoderError) throw encoderError;
 
@@ -204,7 +221,9 @@ async function encodeAnimation(decoder, track, onProgress) {
         // garbage from the backing buffer.
         return { buffer: webm.buffer, ext: '.webm', kind: 'video' };
     } finally {
-        if (encoder.state !== 'closed') encoder.close();
+        // encoder stays null when the clip was rejected before frame 0 finished, or
+        // when frameCount was 0 — the lazy construction means it may never exist.
+        if (encoder && encoder.state !== 'closed') encoder.close();
     }
 }
 
