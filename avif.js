@@ -155,21 +155,24 @@ async function encodeAnimation(decoder, track, onProgress) {
             }
 
             const { image } = await decoder.decode({ frameIndex: i });
-            const duration = image.duration || frameDurationUs;
-            // Re-stamp cumulatively so container timing is ours, and crop to even
-            // dimensions in the same step.
-            const frame = new VideoFrame(image, {
-                timestamp: timestampUs,
-                duration,
-                visibleRect: { x: 0, y: 0, width, height },
-            });
             try {
-                encoder.encode(frame, { keyFrame: i % GOP === 0 });
+                const duration = image.duration || frameDurationUs;
+                // Re-stamp cumulatively so container timing is ours, and crop to even
+                // dimensions in the same step.
+                const frame = new VideoFrame(image, {
+                    timestamp: timestampUs,
+                    duration,
+                    visibleRect: { x: 0, y: 0, width, height },
+                });
+                try {
+                    encoder.encode(frame, { keyFrame: i % GOP === 0 });
+                } finally {
+                    frame.close();
+                }
+                timestampUs += duration;
             } finally {
-                frame.close();
                 image.close();
             }
-            timestampUs += duration;
 
             if (i % PROGRESS_EVERY === 0) onProgress?.(i, frameCount);
             if (encoder.encodeQueueSize > QUEUE_HIGH_WATER) {
@@ -177,6 +180,7 @@ async function encodeAnimation(decoder, track, onProgress) {
             }
         }
 
+        onProgress?.(frameCount, frameCount);
         await encoder.flush();
         if (encoderError) throw encoderError;
 
