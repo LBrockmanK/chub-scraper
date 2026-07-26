@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { guessExtension, generateFilename, resolveCollision } from '../lib.js';
+import {
+    guessExtension, generateFilename, resolveCollision,
+    ST_MEDIA_EXTENSIONS, needsConversion, appendHashMarker, filenamesContainMarker,
+} from '../lib.js';
 
 describe('guessExtension', () => {
     it('uses content-type when available', () => {
@@ -137,5 +140,80 @@ describe('resolveCollision', () => {
         const existing = new Set(['card.jpg']);
         const result = resolveCollision('card.jpg', existing, '1122334455667788');
         assert.equal(result, 'card_11223344.jpg');
+    });
+});
+
+describe('ST_MEDIA_EXTENSIONS', () => {
+    it('includes the formats SillyTavern accepts', () => {
+        for (const ext of ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.webm', '.mp4']) {
+            assert.ok(ST_MEDIA_EXTENSIONS.has(ext), `expected ${ext} to be accepted`);
+        }
+    });
+
+    it('excludes avif, which is why conversion exists', () => {
+        assert.equal(ST_MEDIA_EXTENSIONS.has('.avif'), false);
+    });
+
+    it('excludes svg, which SillyTavern also rejects', () => {
+        // Documented, not handled: converting SVG is out of scope for this change.
+        assert.equal(ST_MEDIA_EXTENSIONS.has('.svg'), false);
+    });
+});
+
+describe('needsConversion', () => {
+    it('is true for avif', () => {
+        assert.equal(needsConversion('.avif'), true);
+    });
+
+    it('is false for formats the gallery already accepts', () => {
+        assert.equal(needsConversion('.png'), false);
+        assert.equal(needsConversion('.webm'), false);
+        assert.equal(needsConversion('.gif'), false);
+    });
+
+    it('is false for formats we cannot convert', () => {
+        assert.equal(needsConversion('.svg'), false);
+        assert.equal(needsConversion('.bin'), false);
+    });
+});
+
+describe('appendHashMarker', () => {
+    it('inserts the marker before the extension', () => {
+        assert.equal(appendHashMarker('description_01.webm', 'a1b2c3d4'), 'description_01_a1b2c3d4.webm');
+    });
+
+    it('works on singular source names', () => {
+        assert.equal(appendHashMarker('card.png', 'deadbeef'), 'card_deadbeef.png');
+    });
+
+    it('only splits on the final dot', () => {
+        assert.equal(appendHashMarker('a.b.webm', '11223344'), 'a.b_11223344.webm');
+    });
+});
+
+describe('filenamesContainMarker', () => {
+    it('finds a marker regardless of source tag or extension', () => {
+        const existing = new Set(['description_01_a1b2c3d4.webm', 'card.png']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), true);
+    });
+
+    it('is false when the marker is absent', () => {
+        const existing = new Set(['description_01_ffffffff.webm']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), false);
+    });
+
+    it('matches the same source content converted to a different format', () => {
+        // A clip first imported as a still PNG, then re-imported: still a duplicate.
+        const existing = new Set(['description_01_a1b2c3d4.png']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), true);
+    });
+
+    it('does not match a marker appearing outside the suffix position', () => {
+        const existing = new Set(['a1b2c3d4_gallery_01.webm']);
+        assert.equal(filenamesContainMarker(existing, 'a1b2c3d4'), false);
+    });
+
+    it('is false for an empty collection', () => {
+        assert.equal(filenamesContainMarker(new Set(), 'a1b2c3d4'), false);
     });
 });

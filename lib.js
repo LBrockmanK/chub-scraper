@@ -154,3 +154,43 @@ export function resolveCollision(filename, existingNames, contentHash) {
     const ext = filename.substring(dotIdx);
     return `${base}_${contentHash.substring(0, 8)}${ext}`;
 }
+
+/**
+ * Extensions SillyTavern's MEDIA_EXTENSIONS allowlist accepts (src/constants.js).
+ *
+ * Both /api/images/upload and /api/images/list gate on this list, so anything
+ * absent here is rejected on upload and invisible in the gallery even if the
+ * file is placed in the folder by hand. Notably absent: avif, svg.
+ */
+export const ST_MEDIA_EXTENSIONS = new Set([
+    '.bmp', '.png', '.jpg', '.jpeg', '.jfif', '.gif', '.webp',
+    '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.3gp', '.mkv', '.mpg',
+]);
+
+/** True for formats we both need to convert and know how to convert. */
+export function needsConversion(ext) {
+    return ext === '.avif';
+}
+
+/** Insert a content-hash marker before the extension. */
+export function appendHashMarker(filename, marker) {
+    const dotIdx = filename.lastIndexOf('.');
+    const base = filename.substring(0, dotIdx);
+    const ext = filename.substring(dotIdx);
+    return `${base}_${marker}${ext}`;
+}
+
+/**
+ * Cross-run dedup for converted images.
+ *
+ * A converted file's bytes never hash to its source's hash, so the source hash
+ * rides along in the filename instead. Matching on `_marker.` keeps the marker
+ * anchored to the suffix position.
+ */
+export function filenamesContainMarker(filenames, marker) {
+    const needle = `_${marker}.`;
+    for (const name of filenames) {
+        if (name.includes(needle)) return true;
+    }
+    return false;
+}
