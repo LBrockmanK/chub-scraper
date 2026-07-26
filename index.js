@@ -3,7 +3,11 @@ import {
     guessExtension,
     generateFilename,
     resolveCollision,
+    needsConversion,
+    appendHashMarker,
+    filenamesContainMarker,
 } from './lib.js';
+import { convertAvif } from './avif.js';
 
 const CHUB_API = 'https://api.chub.ai/api/characters';
 const CHUB_GALLERY_API = 'https://gateway.chub.ai/api/gallery/project';
@@ -136,7 +140,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
 
     const imageEntries = extractRawImageUrls(node, galleryUrls);
     if (imageEntries.length === 0) {
-        return { added: 0, skipped: 0, failed: 0, total: 0 };
+        return { added: 0, skipped: 0, failed: 0, converted: 0, stills: 0, total: 0 };
     }
 
     onProgress(`Found ${imageEntries.length} image(s). Checking existing gallery...`);
@@ -148,6 +152,8 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
     let added = 0;
     let skipped = 0;
     let failed = 0;
+    let converted = 0;
+    let stills = 0;
 
     for (let i = 0; i < imageEntries.length; i++) {
         const entry = imageEntries[i];
@@ -156,21 +162,42 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
         try {
             const { buffer, contentType } = await downloadImage(entry.url);
             const contentHash = await hashContent(buffer);
+            const sourceExt = guessExtension(entry.url, contentType, buffer);
+            const marker = contentHash.substring(0, 8);
+            const convert = needsConversion(sourceExt);
 
-            if (existingHashes.has(contentHash) || batchHashes.has(contentHash)) {
+            // Converted files can never hash-match their source on disk, so they
+            // dedup on the hash marker carried in the filename instead.
+            const alreadyPresent = convert
+                ? filenamesContainMarker(existingNames, marker)
+                : existingHashes.has(contentHash);
+
+            if (alreadyPresent || batchHashes.has(contentHash)) {
                 skipped++;
                 continue;
             }
             batchHashes.add(contentHash);
 
-            const ext = guessExtension(entry.url, contentType, buffer);
-            let filename = generateFilename(entry.source, sourceCounters, ext);
+            let uploadBuffer = buffer;
+            let uploadExt = sourceExt;
+            if (convert) {
+                const result = await convertAvif(buffer, (frame, total) => {
+                    onProgress(`Converting ${i + 1}/${imageEntries.length} (frame ${frame}/${total})...`);
+                });
+                uploadBuffer = result.buffer;
+                uploadExt = result.ext;
+                if (result.kind === 'video') converted++;
+                else stills++;
+            }
+
+            let filename = generateFilename(entry.source, sourceCounters, uploadExt);
+            if (convert) filename = appendHashMarker(filename, marker);
             filename = resolveCollision(filename, existingNames, contentHash);
             existingNames.add(filename);
 
-            const base64 = arrayBufferToBase64(buffer);
+            const base64 = arrayBufferToBase64(uploadBuffer);
             const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
-            const formatWithoutDot = ext.substring(1);
+            const formatWithoutDot = uploadExt.substring(1);
 
             await uploadToGallery(base64, formatWithoutDot, galleryFolder, nameWithoutExt);
             added++;
@@ -181,7 +208,7 @@ async function fetchAndImportImages(chubFullPath, galleryFolder, onProgress) {
         }
     }
 
-    return { added, skipped, failed, total: imageEntries.length };
+    return { added, skipped, failed, converted, stills, total: imageEntries.length };
 }
 
 // --- UI ---
@@ -241,7 +268,14 @@ function injectButton(galleryElement) {
             });
 
             const parts = [];
-            if (result.added > 0) parts.push(`${result.added} added`);
+            if (result.added > 0) {
+                const detail = [];
+                if (result.converted > 0) detail.push(`${result.converted} converted`);
+                if (result.stills > 0) detail.push(`${result.stills} as still frames`);
+                parts.push(detail.length > 0
+                    ? `${result.added} added (${detail.join(', ')})`
+                    : `${result.added} added`);
+            }
             if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
             if (result.failed > 0) parts.push(`${result.failed} failed`);
             if (result.total === 0) parts.push('No images on Chub');
