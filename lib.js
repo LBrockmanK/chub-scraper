@@ -84,6 +84,15 @@ export function extractRawImageUrls(node, galleryImageUrls = []) {
         }
     }
 
+    const entries = definition.character_book?.entries || [];
+    for (let i = 0; i < entries.length; i++) {
+        const content = entries[i]?.content;
+        if (!content) continue;
+        for (const img of extractImagesFromHtml(content, `world_info_${i + 1}`)) {
+            add(img.url, img.source);
+        }
+    }
+
     const defChubExt = definition.extensions?.chub;
     if (defChubExt?.background_image) {
         add(defChubExt.background_image, 'background');

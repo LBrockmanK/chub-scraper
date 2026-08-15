@@ -190,6 +190,32 @@ describe('extractRawImageUrls', () => {
         assert.equal(result.length, 0);
     });
 
+    it('extracts images from character book entries', () => {
+        const node = {
+            definition: {
+                character_book: {
+                    entries: [
+                        { content: '<img src="https://example.com/wi1.png">' },
+                        { content: 'No images here' },
+                        { content: '![lore](https://example.com/wi3.jpg)' },
+                    ],
+                },
+            },
+        };
+        const result = extractRawImageUrls(node);
+        assert.equal(result.length, 2);
+        assert.equal(result[0].url, 'https://example.com/wi1.png');
+        assert.equal(result[0].source, 'world_info_1');
+        assert.equal(result[1].url, 'https://example.com/wi3.jpg');
+        assert.equal(result[1].source, 'world_info_3');
+    });
+
+    it('handles missing character book gracefully', () => {
+        const node = { definition: { character_book: null } };
+        const result = extractRawImageUrls(node);
+        assert.equal(result.length, 0);
+    });
+
     it('skips empty alternate greetings', () => {
         const node = {
             definition: {

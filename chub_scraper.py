@@ -132,7 +132,13 @@ def extract_image_urls(node: dict) -> list[dict]:
         for i, greeting in enumerate(definition.get("alternate_greetings") or []):
             if greeting:
                 html_fields.append((f"greeting_{i + 1}", greeting))
-        # Also check the character book / extensions inside definition
+        for i, entry in enumerate(
+            (definition.get("character_book") or {}).get("entries") or []
+        ):
+            content = (entry or {}).get("content", "")
+            if content:
+                html_fields.append((f"world_info_{i + 1}", content))
+
         def_ext = (definition.get("extensions") or {}).get("chub", {})
         if isinstance(def_ext, dict):
             add(def_ext.get("background_image", ""), "background")
