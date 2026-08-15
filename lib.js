@@ -84,7 +84,8 @@ export function extractRawImageUrls(node, galleryImageUrls = []) {
         }
     }
 
-    const entries = definition.character_book?.entries || [];
+    const lorebook = definition.character_book || definition.embedded_lorebook;
+    const entries = lorebook?.entries || [];
     for (let i = 0; i < entries.length; i++) {
         const content = entries[i]?.content;
         if (!content) continue;

@@ -210,8 +210,44 @@ describe('extractRawImageUrls', () => {
         assert.equal(result[1].source, 'world_info_3');
     });
 
+    it('extracts images from embedded_lorebook entries', () => {
+        const node = {
+            definition: {
+                embedded_lorebook: {
+                    entries: [
+                        { content: '![pic](https://example.com/lb.png)' },
+                    ],
+                },
+            },
+        };
+        const result = extractRawImageUrls(node);
+        assert.equal(result.length, 1);
+        assert.equal(result[0].url, 'https://example.com/lb.png');
+        assert.equal(result[0].source, 'world_info_1');
+    });
+
+    it('prefers character_book over embedded_lorebook', () => {
+        const node = {
+            definition: {
+                character_book: {
+                    entries: [
+                        { content: '<img src="https://example.com/cb.png">' },
+                    ],
+                },
+                embedded_lorebook: {
+                    entries: [
+                        { content: '<img src="https://example.com/lb.png">' },
+                    ],
+                },
+            },
+        };
+        const result = extractRawImageUrls(node);
+        assert.equal(result.length, 1);
+        assert.equal(result[0].url, 'https://example.com/cb.png');
+    });
+
     it('handles missing character book gracefully', () => {
-        const node = { definition: { character_book: null } };
+        const node = { definition: { character_book: null, embedded_lorebook: null } };
         const result = extractRawImageUrls(node);
         assert.equal(result.length, 0);
     });

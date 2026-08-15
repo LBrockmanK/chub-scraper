@@ -132,9 +132,8 @@ def extract_image_urls(node: dict) -> list[dict]:
         for i, greeting in enumerate(definition.get("alternate_greetings") or []):
             if greeting:
                 html_fields.append((f"greeting_{i + 1}", greeting))
-        for i, entry in enumerate(
-            (definition.get("character_book") or {}).get("entries") or []
-        ):
+        lorebook = definition.get("character_book") or definition.get("embedded_lorebook") or {}
+        for i, entry in enumerate(lorebook.get("entries") or []):
             content = (entry or {}).get("content", "")
             if content:
                 html_fields.append((f"world_info_{i + 1}", content))
